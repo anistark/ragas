@@ -145,14 +145,9 @@ class Metric(ABC):
         )
         try:
             if is_event_loop_running():
-                try:
-                    import nest_asyncio
+                from ragas.async_utils import safe_nest_asyncio_apply
 
-                    nest_asyncio.apply()
-                except ImportError:
-                    raise ImportError(
-                        "It seems like your running this in a jupyter-like environment. Please install nest_asyncio with `pip install nest_asyncio` to make it work."
-                    )
+                safe_nest_asyncio_apply()
             loop = asyncio.get_event_loop()
             score = loop.run_until_complete(self._ascore(row=row, callbacks=group_cm))
         except Exception as e:
@@ -468,14 +463,9 @@ class SingleTurnMetric(Metric):
         )
         try:
             if is_event_loop_running():
-                try:
-                    import nest_asyncio
+                from ragas.async_utils import safe_nest_asyncio_apply
 
-                    nest_asyncio.apply()
-                except ImportError:
-                    raise ImportError(
-                        "It seems like your running this in a jupyter-like environment. Please install nest_asyncio with `pip install nest_asyncio` to make it work."
-                    )
+                safe_nest_asyncio_apply()
             loop = asyncio.get_event_loop()
             score = loop.run_until_complete(
                 self._single_turn_ascore(sample=sample, callbacks=group_cm)
@@ -596,14 +586,9 @@ class MultiTurnMetric(Metric):
         )
         try:
             if is_event_loop_running():
-                try:
-                    import nest_asyncio
+                from ragas.async_utils import safe_nest_asyncio_apply
 
-                    nest_asyncio.apply()
-                except ImportError:
-                    raise ImportError(
-                        "It seems like your running this in a jupyter-like environment. Please install nest_asyncio with `pip install nest_asyncio` to make it work."
-                    )
+                safe_nest_asyncio_apply()
             loop = asyncio.get_event_loop()
             score = loop.run_until_complete(
                 self._multi_turn_ascore(sample=sample, callbacks=group_cm)

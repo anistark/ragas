@@ -1,12 +1,123 @@
 """Async utils."""
 
 import asyncio
+import logging
 from typing import Any, Coroutine, List, Optional
 
 from tqdm.auto import tqdm
 
-from ragas.executor import is_event_loop_running
 from ragas.utils import batched
+
+logger = logging.getLogger(__name__)
+
+
+def safe_nest_asyncio_apply() -> bool:
+    """
+    Safely apply nest_asyncio only if compatible with the current event loop.
+
+    Returns:
+        bool: True if nest_asyncio was applied, False if skipped due to incompatibility
+
+    Raises:
+        ImportError: If nest_asyncio is required but not installed
+        ValueError: If an unexpected error occurs during patching
+    """
+    try:
+        import nest_asyncio
+    except ImportError as e:
+        raise ImportError(
+            "It seems like your running this in a jupyter-like environment. "
+            "Please install nest_asyncio with `pip install nest_asyncio` to make it work."
+        ) from e
+
+    # Check if we're dealing with uvloop which doesn't support nest_asyncio patching
+    try:
+        loop = asyncio.get_running_loop()
+        loop_type_name = type(loop).__name__
+
+        # uvloop.Loop and other non-standard event loops can't be patched
+        if "uvloop" in loop_type_name.lower() or "uvloop" in str(type(loop)):
+            logger.debug(
+                f"Skipping nest_asyncio.apply() for incompatible loop type: {type(loop)}"
+            )
+            return False
+
+    except RuntimeError:
+        # No running loop, safe to proceed
+        pass
+
+    try:
+        nest_asyncio.apply()
+        logger.debug("Successfully applied nest_asyncio patch")
+        return True
+    except ValueError as e:
+        error_msg = str(e)
+        if "Can't patch loop of type" in error_msg:
+            # This is the uvloop incompatibility - not an error, just log and skip
+            logger.debug(
+                f"Skipping nest_asyncio.apply() due to incompatible event loop: {error_msg}"
+            )
+            return False
+        else:
+            # Some other ValueError we didn't expect
+            raise
+
+
+def is_uvloop_event_loop():
+    """Check if uvloop is being used as the event loop policy."""
+    policy = asyncio.get_event_loop_policy()
+    return "uvloop" in str(type(policy)) or "uvloop" in policy.__class__.__module__
+
+
+def safe_asyncio_run(coro):
+    """
+    Safely run a coroutine, handling both standard asyncio and uvloop.
+
+    Args:
+        coro: The coroutine to run
+
+    Returns:
+        The result of the coroutine
+    """
+    # Check if we already have a running event loop
+    try:
+        loop = asyncio.get_running_loop()
+        # If we're in a running loop, we can't use asyncio.run
+        # For uvloop, nest_asyncio doesn't work, so we use loop.run_until_complete
+        if is_uvloop_event_loop():
+            logger.debug("Using loop.run_until_complete for uvloop compatibility")
+            return loop.run_until_complete(coro)
+        else:
+            # Standard asyncio loop - try to apply nest_asyncio and use asyncio.run
+            if safe_nest_asyncio_apply():
+                logger.debug("Using asyncio.run with nest_asyncio patch")
+                return asyncio.run(coro)
+            else:
+                # Fallback to loop.run_until_complete if nest_asyncio failed
+                logger.debug("Using loop.run_until_complete as fallback")
+                return loop.run_until_complete(coro)
+    except RuntimeError:
+        # No running loop
+        if is_uvloop_event_loop():
+            # Create and use uvloop explicitly
+            logger.debug("Creating new uvloop for coroutine execution")
+            try:
+                import uvloop
+
+                loop = uvloop.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(coro)
+                finally:
+                    loop.close()
+            except ImportError:
+                # Fallback if uvloop import fails
+                logger.debug("uvloop import failed, using standard asyncio.run")
+                return asyncio.run(coro)
+        else:
+            # Standard asyncio - use asyncio.run directly
+            logger.debug("Using standard asyncio.run")
+            return asyncio.run(coro)
 
 
 def run_async_tasks(
@@ -73,17 +184,5 @@ def run_async_tasks(
 
         return results
 
-    if is_event_loop_running():
-        # an event loop is running so call nested_asyncio to fix this
-        try:
-            import nest_asyncio
-        except ImportError:
-            raise ImportError(
-                "It seems like your running this in a jupyter-like environment. "
-                "Please install nest_asyncio with `pip install nest_asyncio` to make it work."
-            )
-        else:
-            nest_asyncio.apply()
-
-    results = asyncio.run(_run())
+    results = safe_asyncio_run(_run())
     return results

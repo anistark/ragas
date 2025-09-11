@@ -6,14 +6,11 @@ import threading
 import typing as t
 from dataclasses import dataclass, field
 
-import nest_asyncio
 import numpy as np
 from tqdm.auto import tqdm
 
 from ragas.run_config import RunConfig
 from ragas.utils import batched
-
-nest_asyncio.apply()
 
 logger = logging.getLogger(__name__)
 
@@ -260,21 +257,9 @@ class Executor:
         """
         Execute all submitted jobs and return their results. The results are returned in the order of job submission.
         """
-        if is_event_loop_running():
-            # an event loop is running so call nested_asyncio to fix this
-            try:
-                import nest_asyncio
-            except ImportError as e:
-                raise ImportError(
-                    "It seems like your running this in a jupyter-like environment. "
-                    "Please install nest_asyncio with `pip install nest_asyncio` to make it work."
-                ) from e
-            else:
-                if not self._nest_asyncio_applied:
-                    nest_asyncio.apply()
-                    self._nest_asyncio_applied = True
+        from ragas.async_utils import safe_asyncio_run
 
-        results = asyncio.run(self._process_jobs())
+        results = safe_asyncio_run(self._process_jobs())
         sorted_results = sorted(results, key=lambda x: x[0])
         return [r[1] for r in sorted_results]
 

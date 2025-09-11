@@ -166,6 +166,7 @@ dev = [
     "openinference-instrumentation-langchain>=0.1.29",
     # Include all optional features
     "ragas[all,tracing,gdrive,ai-frameworks]",
+    "uvloop>=0.21.0",
 ]
 docs = [
     "mkdocs>=1.6.1",
