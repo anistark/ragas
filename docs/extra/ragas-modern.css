@@ -176,3 +176,74 @@ code, kbd, samp, pre {
 }
 
 /* Let Material Design handle everything else - no custom colors, spacing, or layouts */
+
+/* ========================================
+   CODE BLOCK STYLING FOR SHADCN THEME
+   ======================================== */
+
+/* Code block container */
+pre {
+  background-color: #f5f5f5;
+  border-radius: 8px;
+  border: 1px solid #e5e5e5;
+  padding: 16px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+/* Dark mode code blocks */
+@media (prefers-color-scheme: dark) {
+  pre {
+    background-color: #1e1e1e;
+    border-color: #333;
+  }
+}
+
+/* Inline code */
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9em;
+  background-color: #f0f0f0;
+  color: #333;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: normal;
+}
+
+@media (prefers-color-scheme: dark) {
+  code {
+    background-color: #2d2d2d;
+    color: #e8e8e8;
+  }
+}
+
+/* Code inside pre (don't style redundantly) */
+pre code {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* Syntax highlighting colors */
+.hljs-string { color: #a31515; }
+.hljs-number { color: #098658; }
+.hljs-literal { color: #0000ff; }
+.hljs-attr { color: #ff0000; }
+.hljs-built_in { color: #0070c1; }
+.hljs-title { color: #795e26; }
+.hljs-function { color: #795e26; }
+.hljs-keyword { color: #0000ff; }
+.hljs-comment { color: #008000; }
+
+@media (prefers-color-scheme: dark) {
+  .hljs-string { color: #ce9178; }
+  .hljs-number { color: #b5cea8; }
+  .hljs-literal { color: #569cd6; }
+  .hljs-attr { color: #9cdcfe; }
+  .hljs-built_in { color: #4ec9b0; }
+  .hljs-title { color: #dcdcaa; }
+  .hljs-function { color: #dcdcaa; }
+  .hljs-keyword { color: #569cd6; }
+  .hljs-comment { color: #6a9955; }
+}
