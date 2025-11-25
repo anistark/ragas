@@ -172,6 +172,7 @@ docs = [
     "mkdocs>=1.6.1",
     "mkdocs-material",
     "mkdocs-material[imaging]",
+    "mkdocs-shadcn",
     "mkdocstrings[python]",
     "mkdocs-glightbox",
     "mkdocs-autorefs",
