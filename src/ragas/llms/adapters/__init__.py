@@ -34,7 +34,8 @@ def auto_detect_adapter(client: t.Any, provider: str) -> str:
     Logic:
     1. If client is from litellm module → use litellm
     2. If provider is gemini/google → use litellm
-    3. Default → use instructor
+    3. If self-hosted LLM detected (localhost/127.0.0.1 in base_url) → use litellm
+    4. Default → use instructor
 
     Args:
         client: Pre-initialized client
@@ -51,6 +52,22 @@ def auto_detect_adapter(client: t.Any, provider: str) -> str:
     # Check provider
     if provider.lower() in ("google", "gemini"):
         return "litellm"
+
+    # Detect self-hosted LLMs by checking base_url
+    # Self-hosted LLMs often have unreliable tool calling support,
+    # so we use LiteLLM which falls back to JSON mode automatically
+    if hasattr(client, "_base_url"):
+        try:
+            base_url = str(client._base_url)
+            # Check for localhost or local IP addresses
+            if any(
+                indicator in base_url.lower()
+                for indicator in ["localhost", "127.0.0.1", "0.0.0.0"]
+            ):
+                return "litellm"
+        except (AttributeError, TypeError):
+            # If we can't get base_url, just continue
+            pass
 
     # Default
     return "instructor"

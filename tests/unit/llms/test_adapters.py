@@ -122,6 +122,50 @@ class TestAutoDetectAdapter:
             adapter_name = auto_detect_adapter(client, provider)
             assert adapter_name == "litellm"
 
+    def test_auto_detect_localhost_uses_litellm(self):
+        """Test that localhost base_url auto-detects litellm adapter."""
+        # Create a mock client with localhost base_url
+        client = Mock()
+        client._base_url = "http://localhost:8000/v1"
+
+        adapter_name = auto_detect_adapter(client, "openai")
+        assert adapter_name == "litellm"
+
+    def test_auto_detect_127_0_0_1_uses_litellm(self):
+        """Test that 127.0.0.1 base_url auto-detects litellm adapter."""
+        # Create a mock client with 127.0.0.1 base_url
+        client = Mock()
+        client._base_url = "http://127.0.0.1:8000/v1"
+
+        adapter_name = auto_detect_adapter(client, "openai")
+        assert adapter_name == "litellm"
+
+    def test_auto_detect_0_0_0_0_uses_litellm(self):
+        """Test that 0.0.0.0 base_url auto-detects litellm adapter."""
+        # Create a mock client with 0.0.0.0 base_url
+        client = Mock()
+        client._base_url = "http://0.0.0.0:8000/v1"
+
+        adapter_name = auto_detect_adapter(client, "openai")
+        assert adapter_name == "litellm"
+
+    def test_auto_detect_remote_url_uses_instructor(self):
+        """Test that remote URLs still use instructor adapter."""
+        # Create a mock client with remote base_url
+        client = Mock()
+        client._base_url = "https://api.openai.com/v1"
+
+        adapter_name = auto_detect_adapter(client, "openai")
+        assert adapter_name == "instructor"
+
+    def test_auto_detect_no_base_url_attribute_uses_instructor(self):
+        """Test that clients without _base_url attribute default to instructor."""
+        # Create a mock client without _base_url
+        client = MockClient()
+
+        adapter_name = auto_detect_adapter(client, "openai")
+        assert adapter_name == "instructor"
+
 
 class TestInstructorAdapter:
     """Test InstructorAdapter implementation."""

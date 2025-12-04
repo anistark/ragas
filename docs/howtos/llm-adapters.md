@@ -56,7 +56,8 @@ When `adapter="auto"` (default), Ragas uses this logic:
 
 1. **Check client type**: If client is from `litellm` module → use LiteLLM adapter
 2. **Check provider**: If provider is `google` or `gemini` → use LiteLLM adapter
-3. **Default**: Use Instructor adapter for all other cases
+3. **Check base_url**: If `localhost`, `127.0.0.1`, or `0.0.0.0` detected → use LiteLLM adapter (for self-hosted LLMs)
+4. **Default**: Use Instructor adapter for all other cases
 
 ```python
 from ragas.llms.adapters import auto_detect_adapter
@@ -67,6 +68,12 @@ print(adapter_name)  # Output: "litellm"
 
 adapter_name = auto_detect_adapter(client, "openai")
 print(adapter_name)  # Output: "instructor"
+
+# Self-hosted detection
+from openai import AsyncOpenAI
+self_hosted_client = AsyncOpenAI(base_url="http://localhost:8000/v1")
+adapter_name = auto_detect_adapter(self_hosted_client, "openai")
+print(adapter_name)  # Output: "litellm" (auto-detected!)
 ```
 
 ## Provider-Specific Examples
@@ -120,20 +127,36 @@ llm = llm_factory("gemini-2.0-flash", client=client, adapter="litellm")
 # Uses LiteLLM adapter explicitly
 ```
 
-### Local Models (Ollama)
+### Self-Hosted / Local Models (vLLM, Ollama, Text Generation Inference)
+
+For self-hosted LLMs, **use the LiteLLM adapter** as it automatically falls back to JSON mode when function calling is not properly supported:
 
 ```python
-from openai import OpenAI
+from openai import AsyncOpenAI
 from ragas.llms import llm_factory
 
-# Ollama exposes OpenAI-compatible API
-client = OpenAI(
-    api_key="ollama",
-    base_url="http://localhost:11434/v1"
+# vLLM, Ollama, or any OpenAI-compatible self-hosted endpoint
+client = AsyncOpenAI(
+    api_key="your-key",  # or "ollama" for Ollama
+    base_url="http://localhost:8000/v1"  # Your self-hosted endpoint
 )
-llm = llm_factory("mistral", provider="openai", client=client)
-# Uses Instructor adapter
+
+# Recommended: Use LiteLLM adapter for self-hosted models
+llm = llm_factory(
+    "custom-model",
+    provider="openai",
+    client=client,
+    adapter="litellm"  # Important: Use LiteLLM for self-hosted
+)
+# LiteLLM automatically detects localhost and uses the appropriate adapter
 ```
+
+**Why LiteLLM for self-hosted?**
+- Self-hosted models often don't properly implement OpenAI's function calling protocol
+- LiteLLM automatically falls back to JSON mode when tool calling fails
+- Supports 100+ providers including vLLM, Ollama, Text Generation Inference, etc.
+
+**Note:** If you use `localhost`, `127.0.0.1`, or `0.0.0.0` in your `base_url`, Ragas will automatically select the LiteLLM adapter for you!
 
 ### AWS Bedrock
 
@@ -192,13 +215,18 @@ Choose your adapter based on your needs:
 - Provider is natively supported by Instructor
 - You want the most stable, well-tested option
 - Provider doesn't require special handling
+- Using official API endpoints (not self-hosted)
 
 ### Use LiteLLM Adapter if:
 - Using Google Gemini
-- Using local models (Ollama, vLLM, etc.)
+- **Using self-hosted LLMs (vLLM, Ollama, Text Generation Inference, etc.)** ← Recommended!
+- Using local models that may not implement function calling properly
 - Using providers with 100+ options (Bedrock, etc.)
 - You need maximum provider compatibility
 - Auto-detection selects it for your provider
+- Your LLM returns "multiple tool calls" errors
+
+**For self-hosted LLMs:** The LiteLLM adapter automatically falls back to JSON mode when function calling is unreliable, making it much more robust for custom deployments.
 
 ## Working with Adapters Directly
 
@@ -327,6 +355,37 @@ print(results)
 ```
 
 ## Troubleshooting
+
+### "Multiple tool calls" or "Instructor does not support multiple tool calls"
+
+This error typically occurs with self-hosted LLMs that don't properly implement OpenAI's function calling protocol.
+
+**Solution:** Use the LiteLLM adapter instead:
+
+```python
+from openai import AsyncOpenAI
+from ragas.llms import llm_factory
+
+client = AsyncOpenAI(
+    api_key="your-key",
+    base_url="http://localhost:8000/v1"  # Your self-hosted endpoint
+)
+
+# Fix: Use LiteLLM adapter
+llm = llm_factory(
+    "custom-model",
+    client=client,
+    provider="openai",
+    adapter="litellm"  # This solves the issue!
+)
+```
+
+**Why this happens:**
+- Self-hosted models may return multiple tool calls when Instructor expects only one
+- Or they may not follow the exact function calling format that Instructor requires
+- LiteLLM is more forgiving and automatically falls back to JSON mode
+
+**Note:** If using `localhost` in your base_url, this should auto-detect and use LiteLLM automatically!
 
 ### "Unknown adapter: xyz"
 

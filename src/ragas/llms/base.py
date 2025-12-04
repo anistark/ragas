@@ -512,6 +512,7 @@ def llm_factory(
 
     Auto-detects the best adapter for your provider:
     - Google Gemini → uses LiteLLM adapter
+    - Self-hosted LLMs → recommended to use LiteLLM adapter (see below)
     - Other providers → uses Instructor adapter (default)
     - Explicit control available via adapter parameter
 
@@ -523,8 +524,8 @@ def llm_factory(
                OpenAI(...) or AsyncOpenAI(...).
         adapter: Structured output adapter to use (default: "auto").
                 - "auto": Auto-detect based on provider/client (recommended)
-                - "instructor": Use Instructor library
-                - "litellm": Use LiteLLM (supports 100+ providers)
+                - "instructor": Use Instructor library (strict tool calling)
+                - "litellm": Use LiteLLM (supports 100+ providers, better for self-hosted)
         **kwargs: Additional model arguments (temperature, max_tokens, top_p, etc).
 
     Returns:
@@ -552,6 +553,21 @@ def llm_factory(
         client = LiteLLMClient(api_key="...", model="gemini-2.0-flash")
         llm = llm_factory("gemini-2.0-flash", client=client)
 
+        # Self-hosted LLMs (vLLM, Ollama, etc.) - use LiteLLM adapter
+        # LiteLLM adapter automatically falls back to JSON mode if tool calling
+        # is not properly supported by the model
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(
+            api_key="your-key",
+            base_url="http://localhost:8000/v1"  # Your self-hosted endpoint
+        )
+        llm = llm_factory(
+            model="custom-model",
+            client=client,
+            provider="openai",
+            adapter="litellm"  # Recommended for self-hosted LLMs
+        )
+
         # Explicit adapter selection
         llm = llm_factory("gemini-2.0-flash", client=client, adapter="litellm")
 
@@ -560,6 +576,11 @@ def llm_factory(
         client = AsyncOpenAI(api_key="...")
         llm = llm_factory("gpt-4o-mini", client=client)
         response = await llm.agenerate(prompt, ResponseModel)
+
+    Note:
+        For self-hosted LLMs that don't properly implement OpenAI's function calling
+        protocol, use adapter="litellm". The LiteLLM adapter automatically handles
+        models with unreliable tool calling by falling back to JSON mode when needed.
     """
     if client is None:
         raise ValueError(
@@ -944,20 +965,46 @@ class InstructorLLM(InstructorBaseRagasLLM):
             # Map parameters based on provider requirements
             provider_kwargs = self._map_provider_params()
 
-            if self.provider.lower() == "google":
-                result = self.client.create(
-                    messages=messages,
-                    response_model=response_model,
-                    **provider_kwargs,
-                )
-            else:
-                # OpenAI, Anthropic, LiteLLM
-                result = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    response_model=response_model,
-                    **provider_kwargs,
-                )
+            try:
+                if self.provider.lower() == "google":
+                    result = self.client.create(
+                        messages=messages,
+                        response_model=response_model,
+                        **provider_kwargs,
+                    )
+                else:
+                    # OpenAI, Anthropic, LiteLLM
+                    result = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        response_model=response_model,
+                        **provider_kwargs,
+                    )
+            except Exception as e:
+                # Check if this is the multiple tool calls error from instructor
+                error_message = str(e)
+                if "multiple tool calls" in error_message.lower() or (
+                    "InstructorRetryException" in type(e).__name__
+                    and "multiple tool calls" in error_message.lower()
+                ):
+                    raise ValueError(
+                        f"Your LLM returned multiple tool calls, which often happens with "
+                        f"self-hosted LLMs that don't properly implement OpenAI's function "
+                        f"calling protocol.\n\n"
+                        f"SOLUTION: Use the LiteLLM adapter instead:\n\n"
+                        f"  from ragas.llms.base import llm_factory\n"
+                        f"  llm = llm_factory(\n"
+                        f"      model='{self.model}',\n"
+                        f"      client=client,\n"
+                        f"      provider='{self.provider}',\n"
+                        f"      adapter='litellm'  # Use LiteLLM for self-hosted LLMs\n"
+                        f"  )\n\n"
+                        f"The LiteLLM adapter automatically handles self-hosted LLMs and "
+                        f"falls back to JSON mode when tool calling isn't supported.\n\n"
+                        f"For more information, see: https://docs.ragas.io/en/latest/howtos/customizations/customize_models/"
+                    ) from e
+                # Re-raise other exceptions unchanged
+                raise
 
         # Track the usage
         track(
@@ -988,20 +1035,46 @@ class InstructorLLM(InstructorBaseRagasLLM):
         # Map parameters based on provider requirements
         provider_kwargs = self._map_provider_params()
 
-        if self.provider.lower() == "google":
-            result = await self.client.create(
-                messages=messages,
-                response_model=response_model,
-                **provider_kwargs,
-            )
-        else:
-            # OpenAI, Anthropic, LiteLLM
-            result = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                response_model=response_model,
-                **provider_kwargs,
-            )
+        try:
+            if self.provider.lower() == "google":
+                result = await self.client.create(
+                    messages=messages,
+                    response_model=response_model,
+                    **provider_kwargs,
+                )
+            else:
+                # OpenAI, Anthropic, LiteLLM
+                result = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    response_model=response_model,
+                    **provider_kwargs,
+                )
+        except Exception as e:
+            # Check if this is the multiple tool calls error from instructor
+            error_message = str(e)
+            if "multiple tool calls" in error_message.lower() or (
+                "InstructorRetryException" in type(e).__name__
+                and "multiple tool calls" in error_message.lower()
+            ):
+                raise ValueError(
+                    f"Your LLM returned multiple tool calls, which often happens with "
+                    f"self-hosted LLMs that don't properly implement OpenAI's function "
+                    f"calling protocol.\n\n"
+                    f"SOLUTION: Use the LiteLLM adapter instead:\n\n"
+                    f"  from ragas.llms.base import llm_factory\n"
+                    f"  llm = llm_factory(\n"
+                    f"      model='{self.model}',\n"
+                    f"      client=client,\n"
+                    f"      provider='{self.provider}',\n"
+                    f"      adapter='litellm'  # Use LiteLLM for self-hosted LLMs\n"
+                    f"  )\n\n"
+                    f"The LiteLLM adapter automatically handles self-hosted LLMs and "
+                    f"falls back to JSON mode when tool calling isn't supported.\n\n"
+                    f"For more information, see: https://docs.ragas.io/en/latest/howtos/customizations/customize_models/"
+                ) from e
+            # Re-raise other exceptions unchanged
+            raise
 
         # Track the usage
         track(
