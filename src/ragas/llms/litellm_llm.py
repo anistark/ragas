@@ -25,21 +25,24 @@ class LiteLLMStructuredLLM(InstructorBaseRagasLLM):
         client: t.Any,
         model: str,
         provider: str,
+        original_client: t.Optional[t.Any] = None,
         **kwargs,
     ):
         """
         Initialize LiteLLM structured LLM.
 
         Args:
-            client: LiteLLM client instance
+            client: LiteLLM client instance (instructor-wrapped)
             model: Model name (e.g., "gemini-2.0-flash")
             provider: Provider name
+            original_client: Original unwrapped client (for fallback recreation)
             **kwargs: Additional model arguments (temperature, max_tokens, etc.)
         """
         self.client = client
         self.model = model
         self.provider = provider
         self.model_args = kwargs
+        self.original_client = original_client  # Store for fallback
 
         # Check if client is async-capable at initialization
         self.is_async = self._check_client_async()
@@ -103,6 +106,51 @@ class LiteLLMStructuredLLM(InstructorBaseRagasLLM):
             return False
         except (AttributeError, TypeError):
             return False
+
+    def _fallback_to_json_mode(self) -> None:
+        """
+        Fallback to JSON mode when tool calling fails.
+
+        Recreates the instructor client with Mode.JSON instead of Mode.TOOLS.
+        This is used when self-hosted LLMs return multiple tool calls or don't
+        properly support OpenAI's function calling protocol.
+        """
+        if self.original_client is None:
+            logger.warning(
+                "Cannot fallback to JSON mode: original_client not available. "
+                "Continuing with current client."
+            )
+            return
+
+        try:
+            import instructor
+
+            logger.warning(
+                f"Model {self.model} returned multiple tool calls or doesn't support "
+                f"tool calling properly. Falling back to JSON mode (Mode.JSON)."
+            )
+
+            # Recreate the client with JSON mode
+            if self.provider.lower() == "openai":
+                self.client = instructor.from_openai(
+                    self.original_client, mode=instructor.Mode.JSON
+                )
+            elif self.provider.lower() == "litellm":
+                self.client = instructor.from_litellm(
+                    self.original_client, mode=instructor.Mode.JSON
+                )
+            else:
+                # For other providers, try generic approach with JSON mode
+                self.client = instructor.from_openai(
+                    self.original_client, mode=instructor.Mode.JSON
+                )
+
+            logger.info(f"Successfully switched to JSON mode for {self.model}")
+
+        except Exception as e:
+            logger.error(f"Failed to fallback to JSON mode: {e}")
+            # Continue with existing client
+            pass
 
     def _run_async_in_current_loop(self, coro: t.Awaitable[t.Any]) -> t.Any:
         """Run an async coroutine in the current event loop if possible.
@@ -175,7 +223,7 @@ class LiteLLMStructuredLLM(InstructorBaseRagasLLM):
         Returns:
             Instance of response_model with generated data
         """
-        messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "user", "content": prompt}]  # type: ignore
 
         # If client is async, use the appropriate method to run it
         if self.is_async:
@@ -183,13 +231,37 @@ class LiteLLMStructuredLLM(InstructorBaseRagasLLM):
                 self.agenerate(prompt, response_model)
             )
         else:
-            # Call LiteLLM with structured output
-            result = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                response_model=response_model,
-                **self.model_args,
-            )
+            # Call LiteLLM with structured output, with fallback to JSON mode
+            try:
+                result = self.client.chat.completions.create(  # type: ignore[call-overload]
+                    model=self.model,
+                    messages=messages,  # type: ignore[arg-type]
+                    response_model=response_model,
+                    **self.model_args,
+                )
+            except Exception as e:
+                # Check if this is the multiple tool calls error
+                error_message = str(e)
+                if "multiple tool calls" in error_message.lower() or (
+                    "InstructorRetryException" in type(e).__name__
+                    and "multiple tool calls" in error_message.lower()
+                ):
+                    # Fallback to JSON mode and retry
+                    logger.info(
+                        "Retrying with JSON mode due to multiple tool calls error"
+                    )
+                    self._fallback_to_json_mode()
+
+                    # Retry with JSON mode
+                    result = self.client.chat.completions.create(  # type: ignore[call-overload]
+                        model=self.model,
+                        messages=messages,  # type: ignore[arg-type]
+                        response_model=response_model,
+                        **self.model_args,
+                    )
+                else:
+                    # Re-raise other exceptions
+                    raise
 
         # Track the usage
         track(
@@ -217,7 +289,7 @@ class LiteLLMStructuredLLM(InstructorBaseRagasLLM):
         Returns:
             Instance of response_model with generated data
         """
-        messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "user", "content": prompt}]  # type: ignore
 
         # If client is not async, raise a helpful error
         if not self.is_async:
@@ -225,13 +297,35 @@ class LiteLLMStructuredLLM(InstructorBaseRagasLLM):
                 "Cannot use agenerate() with a synchronous client. Use generate() instead."
             )
 
-        # Call LiteLLM async with structured output
-        result = await self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            response_model=response_model,
-            **self.model_args,
-        )
+        # Call LiteLLM async with structured output, with fallback to JSON mode
+        try:
+            result = await self.client.chat.completions.create(  # type: ignore[call-overload]
+                model=self.model,
+                messages=messages,  # type: ignore[arg-type]
+                response_model=response_model,
+                **self.model_args,
+            )
+        except Exception as e:
+            # Check if this is the multiple tool calls error
+            error_message = str(e)
+            if "multiple tool calls" in error_message.lower() or (
+                "InstructorRetryException" in type(e).__name__
+                and "multiple tool calls" in error_message.lower()
+            ):
+                # Fallback to JSON mode and retry
+                logger.info("Retrying with JSON mode due to multiple tool calls error")
+                self._fallback_to_json_mode()
+
+                # Retry with JSON mode
+                result = await self.client.chat.completions.create(  # type: ignore[call-overload]
+                    model=self.model,
+                    messages=messages,  # type: ignore[arg-type]
+                    response_model=response_model,
+                    **self.model_args,
+                )
+            else:
+                # Re-raise other exceptions
+                raise
 
         # Track the usage
         track(

@@ -218,11 +218,35 @@ class TestInstructorAdapter:
             adapter.create_llm(client, "gpt-4o", "openai")
 
 
+class MockAsyncInstructor:
+    """Mock AsyncInstructor client for testing async detection."""
+
+    def __init__(self, client):
+        self.client = client
+        self.__class__.__name__ = "AsyncInstructor"
+        self.chat = Mock()
+        self.chat.completions = Mock()
+
+        async def async_create(*args, **kwargs):
+            return LLMResponseModel(response="Async Instructor response")
+
+        self.chat.completions.create = async_create
+
+
 class TestLiteLLMAdapter:
     """Test LiteLLMAdapter implementation."""
 
-    def test_litellm_adapter_create_llm(self):
+    def test_litellm_adapter_create_llm(self, monkeypatch):
         """Test creating LLM with LiteLLMAdapter."""
+
+        def mock_get_instructor_client(client, provider):
+            return MockInstructor(client)
+
+        monkeypatch.setattr(
+            "ragas.llms.base._get_instructor_client",
+            mock_get_instructor_client,
+        )
+
         adapter = LiteLLMAdapter()
         client = MockClient()
         llm = adapter.create_llm(client, "gemini-2.0-flash", "google")
@@ -230,9 +254,19 @@ class TestLiteLLMAdapter:
         assert llm is not None
         assert llm.model == "gemini-2.0-flash"
         assert llm.provider == "google"
+        assert llm.original_client is client  # Verify original client is stored
 
-    def test_litellm_adapter_with_kwargs(self):
+    def test_litellm_adapter_with_kwargs(self, monkeypatch):
         """Test LiteLLMAdapter passes through kwargs."""
+
+        def mock_get_instructor_client(client, provider):
+            return MockInstructor(client)
+
+        monkeypatch.setattr(
+            "ragas.llms.base._get_instructor_client",
+            mock_get_instructor_client,
+        )
+
         adapter = LiteLLMAdapter()
         client = MockClient()
         llm = adapter.create_llm(
@@ -242,15 +276,67 @@ class TestLiteLLMAdapter:
         assert llm.model_args.get("temperature") == 0.5
         assert llm.model_args.get("max_tokens") == 1500
 
-    def test_litellm_adapter_returns_litellm_structured_llm(self):
+    def test_litellm_adapter_returns_litellm_structured_llm(self, monkeypatch):
         """Test that LiteLLMAdapter returns LiteLLMStructuredLLM."""
         from ragas.llms.litellm_llm import LiteLLMStructuredLLM
+
+        def mock_get_instructor_client(client, provider):
+            return MockInstructor(client)
+
+        monkeypatch.setattr(
+            "ragas.llms.base._get_instructor_client",
+            mock_get_instructor_client,
+        )
 
         adapter = LiteLLMAdapter()
         client = MockClient()
         llm = adapter.create_llm(client, "gemini-2.0-flash", "google")
 
         assert isinstance(llm, LiteLLMStructuredLLM)
+
+    def test_litellm_adapter_wraps_async_client(self, monkeypatch):
+        """Test that LiteLLMAdapter properly wraps AsyncOpenAI client."""
+        from ragas.llms.litellm_llm import LiteLLMStructuredLLM
+
+        def mock_get_instructor_client(client, provider):
+            # Simulate wrapping AsyncOpenAI with instructor.from_openai
+            return MockAsyncInstructor(client)
+
+        monkeypatch.setattr(
+            "ragas.llms.base._get_instructor_client",
+            mock_get_instructor_client,
+        )
+
+        adapter = LiteLLMAdapter()
+        client = MockClient(is_async=True)
+        llm = adapter.create_llm(client, "custom-model", "openai")
+
+        assert isinstance(llm, LiteLLMStructuredLLM)
+        # Verify that the wrapped client is AsyncInstructor
+        assert llm.client.__class__.__name__ == "AsyncInstructor"
+        # Verify async detection works
+        assert llm.is_async is True
+
+    def test_litellm_adapter_stores_original_client_for_fallback(self, monkeypatch):
+        """Test that LiteLLMAdapter stores original client for JSON mode fallback."""
+        from ragas.llms.litellm_llm import LiteLLMStructuredLLM
+
+        def mock_get_instructor_client(client, provider):
+            return MockInstructor(client)
+
+        monkeypatch.setattr(
+            "ragas.llms.base._get_instructor_client",
+            mock_get_instructor_client,
+        )
+
+        adapter = LiteLLMAdapter()
+        original_client = MockClient()
+        llm = adapter.create_llm(original_client, "custom-model", "openai")
+
+        assert isinstance(llm, LiteLLMStructuredLLM)
+        # Verify original client is stored for fallback
+        assert llm.original_client is original_client
+        assert llm.original_client is not llm.client  # Should be different objects
 
 
 class TestAdapterIntegration:

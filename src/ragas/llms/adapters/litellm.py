@@ -32,11 +32,17 @@ class LiteLLMAdapter(StructuredOutputAdapter):
         Returns:
             LiteLLMStructuredLLM instance
         """
+        from ragas.llms.base import _get_instructor_client
         from ragas.llms.litellm_llm import LiteLLMStructuredLLM
 
+        # Wrap the client with instructor for structured output support
+        # This is necessary for both sync and async clients
+        patched_client = _get_instructor_client(client, provider)
+
         return LiteLLMStructuredLLM(
-            client=client,
+            client=patched_client,
             model=model,
             provider=provider,
+            original_client=client,  # Pass original for JSON mode fallback
             **kwargs,
         )
