@@ -283,9 +283,9 @@ config = InstructionConfig(llm=llm, optimizer=optimizer, loss=loss)
 
 ## See Also
 
-- [DSPy Optimizer Guide](../howtos/customizations/optimizers/dspy-optimizer.md) - Detailed usage
-- [Metric Customization](../howtos/customizations/metrics/custom-metrics.md) - Creating metrics
-- [Prompt API Reference](./prompt.md) - Understanding prompts
+- [DSPy Optimizer Guide](../howtos/customizations/optimizers/) - Detailed usage
+- [Metric Customization](../howtos/customizations/metrics/modifying-prompts-metrics/) - Creating metrics
+- [Prompt API Reference](./prompt/) - Understanding prompts
 
 ## Additional Resources
 
